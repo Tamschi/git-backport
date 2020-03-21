@@ -1,8 +1,9 @@
 use {
+    console::{measure_text_width, pad_str, truncate_str, Alignment, Key, Term},
     git2::{Branch, BranchType, Repository},
     git_backport::{backport, BackportArgs, Error},
     log::{debug, error},
-    std::path::PathBuf,
+    std::{io::Write, path::PathBuf},
     structopt::StructOpt,
 };
 
@@ -56,6 +57,91 @@ fn main() {
         repository: &repository,
         backup: !options.no_backup,
         branches,
+        edit: |branches, commits| {
+            let mut out = Term::stdout();
+            let mut cursor = 0;
+            let (width, _) = out.size();
+            let width = width as usize;
+            dbg!(width);
+            loop {
+                for (i, (commit, branch)) in commits.iter().enumerate() {
+                    let branch_index = branches
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, branch_i)| {
+                            if branch_i as *const Branch == *branch.borrow() as *const Branch {
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                    out.write_all(pad_str("", branch_index, Alignment::Left, None).as_bytes())
+                        .unwrap();
+                    out.write_all(if cursor == i { b">" } else { b" " })
+                        .unwrap();
+                    out.write_all(truncate_str(&commit.id().to_string(), 8, "").as_bytes())
+                        .unwrap();
+                    out.write_all(b" ").unwrap();
+                    let branch_name =
+                        truncate_str(branch.borrow().name().unwrap().unwrap(), width / 2, "...");
+                    let branch_name_width = measure_text_width(branch_name.as_ref());
+                    out.write_all(branch_name.as_bytes()).unwrap();
+                    out.write_all(b" ").unwrap();
+                    out.write_line(
+                        truncate_str(
+                            commit.message().unwrap(),
+                            width - (branch_index + 1 + 8 + 1 + branch_name_width + 1),
+                            "...",
+                        )
+                        .as_ref(),
+                    )
+                    .unwrap();
+                }
+                {
+                    let branch_index = branches
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, branch_i)| {
+                            if branch_i as *const Branch
+                                == *commits[cursor].1.borrow() as *const Branch
+                            {
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                    use Key::*;
+                    match out.read_key().unwrap() {
+                        ArrowLeft => {
+                            if branch_index > 0 {
+                                *commits[cursor].1.borrow_mut() = &branches[branch_index - 1]
+                            }
+                        }
+                        ArrowRight => {
+                            if branch_index < branches.len() - 1 {
+                                *commits[cursor].1.borrow_mut() = &branches[branch_index + 1]
+                            }
+                        }
+                        ArrowUp => {
+                            if cursor > 0 {
+                                cursor -= 1
+                            }
+                        }
+                        ArrowDown => {
+                            if cursor < commits.len() - 1 {
+                                cursor += 1
+                            }
+                        }
+                        Enter => break,
+                        Escape => panic!(),
+                        _ => (),
+                    }
+                }
+                out.write_line("").unwrap();
+            }
+        },
     }) {
         match error {}
     }

@@ -1,6 +1,9 @@
 use {
-    core::fmt::{self, Formatter},
-    git2::{Branch, Repository},
+    core::{
+        cell::RefCell,
+        fmt::{self, Formatter},
+    },
+    git2::{Branch, Commit, Repository},
     log::{debug, info, trace},
 };
 
@@ -8,28 +11,27 @@ use {
 pub enum Error {}
 impl std::error::Error for Error {}
 impl core::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        use Error::*;
-        match self {
-            UNCLEAN => write!(
-                fmt,
-                "Repository isn't completely clean (including ignored)."
-            ),
-        }
+    fn fmt(&self, _: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        Ok(())
     }
 }
 
-pub struct BackportArgs<'a> {
+pub struct BackportArgs<
+    'a,
+    E: for<'b> FnOnce(&'b [Branch<'b>], &[(Commit, RefCell<&'b Branch<'b>>)]),
+> {
     pub repository: &'a Repository,
     pub backup: bool,
     pub branches: Vec<Branch<'a>>,
+    pub edit: E,
 }
-pub fn backport(
+pub fn backport<E: for<'a> FnOnce(&'a [Branch<'a>], &[(Commit, RefCell<&'a Branch<'a>>)])>(
     BackportArgs {
         repository,
         backup,
         branches,
-    }: BackportArgs,
+        edit,
+    }: BackportArgs<E>,
 ) -> Result<(), Error> {
     info!("Collecting commits...");
     assert!(!branches.is_empty());
@@ -54,14 +56,20 @@ pub fn backport(
                 current_commit.parent_count(),
             );
             let parent_commit = current_commit.parent(0).unwrap();
-            commits.push((current_commit, current));
+            commits.push((current_commit, RefCell::new(current)));
             trace!(
-                "Found commit: {:?} on {:?}",
+                "Found commit: {} on {}",
                 commits[commits.len() - 1].0.id(),
-                commits[commits.len() - 1].1.name(),
+                commits[commits.len() - 1]
+                    .1
+                    .borrow()
+                    .name()
+                    .unwrap()
+                    .unwrap(),
             );
             current_commit = parent_commit;
         }
     }
+    edit(&branches, &commits);
     Ok(())
 }
