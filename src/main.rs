@@ -1,5 +1,5 @@
 use {
-    git2::{BranchType, Repository},
+    git2::{Branch, BranchType, Repository},
     git_backport::{backport, BackportArgs, Error},
     log::{debug, error},
     std::path::PathBuf,
@@ -7,7 +7,10 @@ use {
 };
 
 #[derive(Debug, StructOpt)]
-#[structopt(author)]
+#[structopt(
+    author,
+    about = "\nInteractively backport commits to ancestor branches."
+)]
 struct Options {
     #[structopt(short, long, default_value = ".", parse(from_os_str))]
     repository: PathBuf,
@@ -28,9 +31,7 @@ fn main() {
     let mut branches = vec![if options.head == "HEAD" {
         let head = repository.head().unwrap();
         assert!(head.is_branch());
-        repository
-            .find_branch(&head.name().unwrap(), BranchType::Local)
-            .unwrap()
+        Branch::wrap(head)
     } else {
         repository
             .find_branch(&options.head, BranchType::Local)
@@ -43,8 +44,12 @@ fn main() {
         branches.push(ancestor);
     }
     debug!(
-        "{:#?}",
-        branches.iter().map(|b| b.name()).collect::<Vec<_>>()
+        "Branches specified: {}",
+        (&branches
+            .iter()
+            .map(|b| b.name().unwrap().unwrap())
+            .collect::<Vec<_>>())
+            .join(", ")
     );
 
     if let Err(error) = backport(BackportArgs {
@@ -52,8 +57,6 @@ fn main() {
         backup: !options.no_backup,
         branches,
     }) {
-        match error {
-            Error::UNCLEAN => error!("{}", error),
-        }
+        match error {}
     }
 }
