@@ -3,8 +3,9 @@ use {
         cell::RefCell,
         fmt::{self, Formatter},
     },
-    git2::{Branch, Commit, Repository},
+    git2::{Branch, Commit, Oid, Repository},
     log::{debug, info, trace},
+    std::collections::HashSet,
 };
 
 #[derive(Debug)]
@@ -48,25 +49,45 @@ pub fn backport<E: for<'a> FnOnce(&'a [Branch<'a>], &[(Commit, RefCell<&'a Branc
             if current_commit.id() == parent_branch_id {
                 continue 'branch;
             }
-            assert_eq!(
-                current_commit.parent_count(),
-                1,
-                "Only commits with 1 parent are supported, but {} has {}",
-                current_commit.id(),
-                current_commit.parent_count(),
-            );
-            let parent_commit = current_commit.parent(0).unwrap();
-            commits.push((current_commit, RefCell::new(current)));
             trace!(
                 "Found commit: {} on {}",
-                commits[commits.len() - 1].0.id(),
-                commits[commits.len() - 1]
-                    .1
-                    .borrow()
-                    .name()
-                    .unwrap()
-                    .unwrap(),
+                current_commit.id(),
+                current.name().unwrap().unwrap(),
             );
+            let parent_commit = if current_commit.parent_count() == 1 {
+                current_commit.parent(0).unwrap()
+            } else {
+                trace!(
+                    "Found {} parents. Scanning...",
+                    current_commit.parent_count()
+                );
+                let mut visited = HashSet::new();
+                let matching_parents = current_commit
+                    .parents()
+                    .rev() // The commit we're looking for tends to be on the merged-in branch, at least with my workflow. -TS
+                    .filter(|p| {
+                        fn is_or_has_ancestor(
+                            c: &Commit,
+                            id: Oid,
+                            visited: &mut HashSet<Oid>,
+                        ) -> bool {
+                            visited.insert(c.id())
+                                && (c.id() == id
+                                    || c.parents()
+                                        .rev()
+                                        .any(|p| is_or_has_ancestor(&p, id, visited)))
+                        };
+                        is_or_has_ancestor(p, parent_branch_id, &mut visited)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    matching_parents.len(),
+                    1,
+                    "Ambiguous parents found. The next ancestor must be reachable via only one parent in each commit."
+                );
+                matching_parents.into_iter().next().unwrap()
+            };
+            commits.push((current_commit, RefCell::new(current)));
             current_commit = parent_commit;
         }
     }
