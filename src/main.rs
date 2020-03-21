@@ -15,6 +15,10 @@ use {
 struct Options {
     #[structopt(short, long, default_value = ".", parse(from_os_str))]
     repository: PathBuf,
+    /// Disables accepting child paths.
+    #[structopt(short = "D", long)]
+    no_discovery: bool,
+    /// Disables backup branches.
     #[structopt(short = "B", long)]
     no_backup: bool,
     #[structopt(short, long, default_value = "HEAD")]
@@ -28,7 +32,12 @@ fn main() {
 
     simple_logger::init().unwrap();
 
-    let repository = Repository::open(options.repository).unwrap();
+    let repository = if options.no_discovery {
+        Repository::open(options.repository)
+    } else {
+        Repository::discover(options.repository)
+    }
+    .unwrap();
     let mut branches = vec![if options.head == "HEAD" {
         let head = repository.head().unwrap();
         assert!(head.is_branch());
