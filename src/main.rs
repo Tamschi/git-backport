@@ -60,7 +60,7 @@ fn main() {
         edit: |branches, commits| {
             let mut out = Term::stdout();
             let mut cursor = 0;
-            let (width, _) = out.size();
+            let (_, width) = out.size();
             let width = width as usize;
             dbg!(width);
             loop {
@@ -89,10 +89,19 @@ fn main() {
                     out.write_all(branch_name.as_bytes()).unwrap();
                     out.write_all(b" ").unwrap();
                     out.write_line(
-                        truncate_str(
-                            commit.message().unwrap(),
+                        pad_str(
+                            commit
+                                .message()
+                                .unwrap()
+                                .split('\r')
+                                .next()
+                                .unwrap()
+                                .split('\n')
+                                .next()
+                                .unwrap(),
                             width - (branch_index + 1 + 8 + 1 + branch_name_width + 1),
-                            "...",
+                            Alignment::Left,
+                            Some("..."),
                         )
                         .as_ref(),
                     )
@@ -139,7 +148,7 @@ fn main() {
                         _ => (),
                     }
                 }
-                out.write_line("").unwrap();
+                out.move_cursor_up(commits.len()).unwrap()
             }
         },
     }) {
