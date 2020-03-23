@@ -2,7 +2,7 @@ use {
     console::{measure_text_width, pad_str, truncate_str, Alignment, Key, Term},
     git2::{Branch, BranchType, Repository},
     git_backport::{backport, BackportArgs, BackportCommit},
-    log::{debug},
+    log::debug,
     std::{io::Write, path::PathBuf},
     structopt::StructOpt,
 };
@@ -69,7 +69,7 @@ fn main() {
     if let Err(error) = backport(BackportArgs {
         repository: &repository,
         backup: !options.no_backup,
-        branches,
+        branches: branches.as_slice(),
         edit: |branches, commits| {
             let mut out = Term::stdout();
             let mut cursor = 0;

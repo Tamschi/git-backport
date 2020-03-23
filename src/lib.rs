@@ -5,7 +5,7 @@ use {
     },
     git2::{Branch, Commit, Oid, Repository},
     log::{info, trace},
-    std::collections::HashSet,
+    std::collections::{HashMap, HashSet},
 };
 
 #[derive(Debug)]
@@ -25,7 +25,7 @@ pub struct BackportCommit<'a> {
 pub struct BackportArgs<'a, E: FnOnce(&[Branch], &[BackportCommit])> {
     pub repository: &'a Repository,
     pub backup: bool,
-    pub branches: Vec<Branch<'a>>,
+    pub branches: &'a [Branch<'a>],
     pub edit: E,
 }
 pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
@@ -96,6 +96,77 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             current_commit = parent_commit;
         }
     }
+
     edit(&branches, &commits);
+
+    info!("Detecting forks...");
+    let forks = {
+        let mut visited = HashSet::new();
+        let mut forks = HashMap::new();
+
+        for current_parent in commits
+            .iter()
+            .map(Some)
+            .chain([None].iter().copied())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .rev()
+        {
+            let (current, parents) = match current_parent {
+                [Some(current), parent] => (
+                    current,
+                    current.commit.parents().filter(move |p| {
+                        if let Some(parent) = parent {
+                            p.id() != parent.commit.id()
+                        } else {
+                            true
+                        }
+                    }),
+                ),
+                _ => unreachable!(),
+            };
+            visited.insert(current.commit.id());
+            trace!(
+                " Checking parents of {} on branch {1}...",
+                current.commit.id(),
+                *current.branch_index.borrow()
+            );
+            for parent in parents {
+                visit(
+                    parent,
+                    &mut visited,
+                    *current.branch_index.borrow(),
+                    &mut forks,
+                );
+                fn visit(
+                    commit: Commit,
+                    visited: &mut HashSet<Oid>,
+                    branch_index: usize,
+                    forks: &mut HashMap<Oid, usize>,
+                ) {
+                    if visited.insert(commit.id()) {
+                        trace!("  Found side chain commit {}.", commit.id());
+                        for parent in commit.parents() {
+                            visit(parent, visited, branch_index, forks)
+                        }
+                    } else {
+                        trace!("  Found fork commit {}.", commit.id());
+                        // Fork found.
+                        // Only the ones that are actually on the edited chain are interesting here, but the overhead shouldn't be too bad.
+                        // Smaller branch_index equals a more junior branch, which should make for the cleanest pattern here.
+                        if let Some(old_value) = forks.insert(commit.id(), branch_index) {
+                            if old_value < branch_index {
+                                *forks.get_mut(&commit.id()).unwrap() = old_value
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        forks
+    };
+
+    //TODO
+
     Ok(())
 }
