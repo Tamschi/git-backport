@@ -4,7 +4,7 @@ use {
         fmt::{self, Formatter},
     },
     git2::{Branch, Commit, Oid, Repository},
-    log::{debug, info, trace},
+    log::{info, trace},
     std::collections::HashSet,
 };
 
@@ -17,16 +17,18 @@ impl core::fmt::Display for Error {
     }
 }
 
-pub struct BackportArgs<
-    'a,
-    E: for<'b> FnOnce(&'b [Branch<'b>], &[(Commit, RefCell<&'b Branch<'b>>)]),
-> {
+pub struct BackportCommit<'a> {
+    pub commit: Commit<'a>,
+    pub branch_index: RefCell<usize>,
+}
+
+pub struct BackportArgs<'a, E: FnOnce(&[Branch], &[BackportCommit])> {
     pub repository: &'a Repository,
     pub backup: bool,
     pub branches: Vec<Branch<'a>>,
     pub edit: E,
 }
-pub fn backport<E: for<'a> FnOnce(&'a [Branch<'a>], &[(Commit, RefCell<&'a Branch<'a>>)])>(
+pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
     BackportArgs {
         repository,
         backup,
@@ -37,7 +39,7 @@ pub fn backport<E: for<'a> FnOnce(&'a [Branch<'a>], &[(Commit, RefCell<&'a Branc
     info!("Collecting commits...");
     assert!(!branches.is_empty());
     let mut commits = vec![];
-    'branch: for window in branches.windows(2) {
+    'branch: for (current_index, window) in branches.windows(2).enumerate() {
         let (current, parent) = if let [current, parent] = window {
             (current, parent)
         } else {
@@ -87,7 +89,10 @@ pub fn backport<E: for<'a> FnOnce(&'a [Branch<'a>], &[(Commit, RefCell<&'a Branc
                 );
                 matching_parents.into_iter().next().unwrap()
             };
-            commits.push((current_commit, RefCell::new(current)));
+            commits.push(BackportCommit {
+                commit: current_commit,
+                branch_index: RefCell::new(current_index),
+            });
             current_commit = parent_commit;
         }
     }

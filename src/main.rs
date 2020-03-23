@@ -1,16 +1,20 @@
 use {
     console::{measure_text_width, pad_str, truncate_str, Alignment, Key, Term},
     git2::{Branch, BranchType, Repository},
-    git_backport::{backport, BackportArgs, Error},
-    log::{debug, error},
+    git_backport::{backport, BackportArgs, BackportCommit},
+    log::{debug},
     std::{io::Write, path::PathBuf},
     structopt::StructOpt,
 };
 
+//TODO: Implement it by recursively pulling in and mapping commits that have mapped parents (ancestors).
+// That way, loops will behave properly.
+//TODO: How to map new merges? Solution: Merge-mappings per branch. May need additional scanning to check which commits were forks for each branch, to create those merge commits...
+
 #[derive(Debug, StructOpt)]
 #[structopt(
     author,
-    about = "\nInteractively backport commits to ancestor branches."
+    about = "\nInteractively backport commits to ancestor branches.\n\nKnown issues:\n- If you backport past a loop, the paths not taken are currently not rebased."
 )]
 struct Options {
     #[structopt(short, long, default_value = ".", parse(from_os_str))]
@@ -73,18 +77,15 @@ fn main() {
             let width = width as usize;
             dbg!(width);
             loop {
-                for (i, (commit, branch)) in commits.iter().enumerate() {
-                    let branch_index = branches
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, branch_i)| {
-                            if branch_i as *const Branch == *branch.borrow() as *const Branch {
-                                Some(i)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap();
+                for (
+                    i,
+                    BackportCommit {
+                        commit,
+                        branch_index,
+                    },
+                ) in commits.iter().enumerate()
+                {
+                    let branch_index = *branch_index.borrow();
                     out.write_all(pad_str("", branch_index, Alignment::Left, None).as_bytes())
                         .unwrap();
                     out.write_all(if cursor == i { b">" } else { b" " })
@@ -92,8 +93,11 @@ fn main() {
                     out.write_all(truncate_str(&commit.id().to_string(), 8, "").as_bytes())
                         .unwrap();
                     out.write_all(b" ").unwrap();
-                    let branch_name =
-                        truncate_str(branch.borrow().name().unwrap().unwrap(), width / 2, "...");
+                    let branch_name = truncate_str(
+                        branches[branch_index].name().unwrap().unwrap(),
+                        width / 2,
+                        "...",
+                    );
                     let branch_name_width = measure_text_width(branch_name.as_ref());
                     out.write_all(branch_name.as_bytes()).unwrap();
                     out.write_all(b" ").unwrap();
@@ -117,29 +121,17 @@ fn main() {
                     .unwrap();
                 }
                 {
-                    let branch_index = branches
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, branch_i)| {
-                            if branch_i as *const Branch
-                                == *commits[cursor].1.borrow() as *const Branch
-                            {
-                                Some(i)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap();
+                    let branch_index = &commits[cursor].branch_index;
                     use Key::*;
                     match out.read_key().unwrap() {
                         ArrowLeft => {
-                            if branch_index > 0 {
-                                *commits[cursor].1.borrow_mut() = &branches[branch_index - 1]
+                            if *branch_index.borrow() > 0 {
+                                *branch_index.borrow_mut() -= 1
                             }
                         }
                         ArrowRight => {
-                            if branch_index < branches.len() - 1 {
-                                *commits[cursor].1.borrow_mut() = &branches[branch_index + 1]
+                            if *branch_index.borrow() < branches.len() - 1 {
+                                *branch_index.borrow_mut() += 1
                             }
                         }
                         ArrowUp => {
