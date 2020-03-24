@@ -157,6 +157,8 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                         // Only the ones that are actually on the edited chain are interesting here, but the overhead shouldn't be too bad.
                         // Larger branch_index equals a more senior branch, which is necessary here to make sure changes stay where they should.
                         //TODO: This doesn't properly handle side chain forks yet, though.
+                        // This can probably be fixed by not marking sidechain commits as visited. However, that's O(repository_depth^something).
+                        // The performance issues can be fixed if side chain commits are marked as visited if no forks are found in their parents (i.e. if they aren't based on the main line).
                         if let Some(old_value) = forks.insert(commit.id(), branch_index) {
                             if old_value > branch_index {
                                 *forks.get_mut(&commit.id()).unwrap() = old_value
