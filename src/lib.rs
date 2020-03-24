@@ -1,9 +1,11 @@
+#![allow(unreachable_code)]
+
 use {
     core::{
         cell::RefCell,
         fmt::{self, Formatter},
     },
-    git2::{Branch, Commit, Oid, Repository},
+    git2::{Branch, Commit, MergeOptions, Oid, Repository},
     log::{info, trace},
     std::collections::{HashMap, HashSet},
 };
@@ -154,6 +156,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                         // Fork found.
                         // Only the ones that are actually on the edited chain are interesting here, but the overhead shouldn't be too bad.
                         // Larger branch_index equals a more senior branch, which is necessary here to make sure changes stay where they should.
+                        //TODO: This doesn't properly handle side chain forks yet, though.
                         if let Some(old_value) = forks.insert(commit.id(), branch_index) {
                             if old_value > branch_index {
                                 *forks.get_mut(&commit.id()).unwrap() = old_value
@@ -199,7 +202,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             *commit.branch_index.borrow(),
             branches,
             heads.as_mut_slice(),
-            &inverse_map,
+            &mut inverse_map,
             branch_map_overlays.as_mut_slice(),
             dirty.as_mut_slice(),
             repository,
@@ -208,10 +211,10 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             branch_index: usize,
             branches: &[Branch],
             heads: &mut [Option<Commit<'a>>],
-            inverse_map: &HashMap<Oid, Commit>,
+            inverse_map: &mut HashMap<Oid, Commit<'a>>,
             branch_map_overlays: &mut [HashMap<Oid, Commit<'a>>],
             dirty: &mut [bool],
-            repository: &Repository,
+            repository: &'a Repository,
         ) -> Oid {
             if branch_index == branches.len() - 1 || !dirty[branch_index] {
                 return inverse_map[&heads[branch_index].as_ref().unwrap().id()].id();
@@ -225,18 +228,61 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                 dirty,
                 repository,
             );
-            match heads[branch_index].as_ref() {
-                None => {
-                    heads[branch_index] = Some(heads[branch_index + 1].as_ref().unwrap().clone())
+            trace!("Catching up branch {}...", branch_index);
+            heads[branch_index] = Some(match heads[branch_index].as_ref() {
+                None => heads[branch_index + 1].as_ref().unwrap().clone(),
+                Some(head) => {
+                    let mut merge_index = repository.merge_commits(
+                            head,
+                            heads[branch_index + 1].as_ref().unwrap(),
+                            Some(
+                                MergeOptions::new()
+                                    .find_renames(true)
+                                    .fail_on_conflict(true)
+                                    .minimal(true),
+                            ),
+                        ).expect("This should never fail, since the changes were compatible to begin with.");
+                    let merge_oid = merge_index.write_tree().unwrap();
+                    let merge_tree = repository.find_tree(merge_oid).unwrap();
+                    let signature = repository
+                        .signature()
+                        .expect("Could not create default signature");
+                    let merge_commit_id = repository
+                        .commit(
+                            None,
+                            &signature,
+                            &signature,
+                            &format!(
+                                "Merge {} into {}",
+                                branches[branch_index + 1].name().unwrap().unwrap(),
+                                branches[branch_index].name().unwrap().unwrap(),
+                            ),
+                            &merge_tree,
+                            &[head, heads[branch_index + 1].as_ref().unwrap()],
+                        )
+                        .unwrap();
+                    repository.find_commit(merge_commit_id).unwrap()
                 }
-                Some(head) => heads[branch_index] = { todo!() },
-            }
-            todo!();
+            });
             assert!(branch_map_overlays[branch_index]
-                .insert(original_commit_id, heads[branch_index].unwrap())
+                .insert(
+                    original_commit_id,
+                    heads[branch_index].as_ref().unwrap().clone()
+                )
+                .is_none());
+            assert!(inverse_map
+                .insert(
+                    heads[branch_index].as_ref().unwrap().id(),
+                    repository.find_commit(original_commit_id).unwrap()
+                )
                 .is_none());
             dirty[branch_index] = false;
             original_commit_id
+        }
+
+        todo!("Cherry-pick while mapping parent commits (especially side chains)");
+        for dirty in dirty[0..*commit.branch_index.borrow()].iter_mut() {
+            *dirty = true;
         }
     }
 
