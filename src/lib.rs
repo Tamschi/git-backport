@@ -153,9 +153,9 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                         trace!("  Found fork commit {}.", commit.id());
                         // Fork found.
                         // Only the ones that are actually on the edited chain are interesting here, but the overhead shouldn't be too bad.
-                        // Smaller branch_index equals a more junior branch, which should make for the cleanest pattern here.
+                        // Larger branch_index equals a more senior branch, which is necessary here to make sure changes stay where they should.
                         if let Some(old_value) = forks.insert(commit.id(), branch_index) {
-                            if old_value < branch_index {
+                            if old_value > branch_index {
                                 *forks.get_mut(&commit.id()).unwrap() = old_value
                             }
                         }
@@ -166,7 +166,79 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         forks
     };
 
-    //TODO
+    //TODO: Backup
+
+    let mut heads = vec![None; branches.len()];
+    let mut map = HashMap::new();
+    let mut inverse_map = HashMap::new();
+    let mut branch_map_overlays = vec![HashMap::new(); branches.len()];
+    let mut dirty = vec![false; branches.len()];
+
+    info!("Transforming history...");
+
+    #[allow(clippy::for_loop_over_option)]
+    for BackportCommit {
+        commit: oldest,
+        branch_index,
+    } in commits.last()
+    {
+        // Always unchanged.
+        map.insert(oldest.id(), oldest.clone());
+        inverse_map.insert(oldest.id(), oldest.clone());
+        heads[*branch_index.borrow()] = Some(oldest.clone());
+        for dirty in dirty[0..*branch_index.borrow()].iter_mut() {
+            *dirty = true;
+        }
+    }
+    for commit_parent in commits.windows(2).rev() {
+        let (commit, parent) = match commit_parent {
+            [commit, parent] => (commit, parent),
+            _ => unreachable!(),
+        };
+        catch_up_branch(
+            *commit.branch_index.borrow(),
+            branches,
+            heads.as_mut_slice(),
+            &inverse_map,
+            branch_map_overlays.as_mut_slice(),
+            dirty.as_mut_slice(),
+            repository,
+        );
+        fn catch_up_branch<'a>(
+            branch_index: usize,
+            branches: &[Branch],
+            heads: &mut [Option<Commit<'a>>],
+            inverse_map: &HashMap<Oid, Commit>,
+            branch_map_overlays: &mut [HashMap<Oid, Commit<'a>>],
+            dirty: &mut [bool],
+            repository: &Repository,
+        ) -> Oid {
+            if branch_index == branches.len() - 1 || !dirty[branch_index] {
+                return inverse_map[&heads[branch_index].as_ref().unwrap().id()].id();
+            }
+            let original_commit_id = catch_up_branch(
+                branch_index + 1,
+                branches,
+                heads,
+                inverse_map,
+                branch_map_overlays,
+                dirty,
+                repository,
+            );
+            match heads[branch_index].as_ref() {
+                None => {
+                    heads[branch_index] = Some(heads[branch_index + 1].as_ref().unwrap().clone())
+                }
+                Some(head) => heads[branch_index] = { todo!() },
+            }
+            todo!();
+            assert!(branch_map_overlays[branch_index]
+                .insert(original_commit_id, heads[branch_index].unwrap())
+                .is_none());
+            dirty[branch_index] = false;
+            original_commit_id
+        }
+    }
 
     Ok(())
 }
