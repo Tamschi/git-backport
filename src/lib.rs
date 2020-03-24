@@ -332,6 +332,18 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         for dirty in dirty[0..*commit.branch_index.borrow()].iter_mut() {
             *dirty = true;
         }
+
+        if let Some(&fork_target_branch_index) = forks.get(&commit.commit.id()) {
+            catch_up_branch(
+                fork_target_branch_index,
+                branches,
+                heads.as_mut_slice(),
+                &mut inverse_map,
+                branch_map_overlays.as_mut_slice(),
+                dirty.as_mut_slice(),
+                repository,
+            );
+        }
     }
 
     catch_up_branch(
