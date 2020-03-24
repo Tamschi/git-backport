@@ -145,25 +145,29 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                     visited: &mut HashSet<Oid>,
                     branch_index: usize,
                     forks: &mut HashMap<Oid, usize>,
-                ) {
-                    if visited.insert(commit.id()) {
-                        trace!("  Found side chain commit {}.", commit.id());
+                ) -> bool {
+                    if !visited.contains(&commit.id()) {
+                        //trace!("  Found side chain commit {}.", commit.id());
+                        let mut found_fork = false;
                         for parent in commit.parents() {
-                            visit(parent, visited, branch_index, forks)
+                            found_fork |= visit(parent, visited, branch_index, forks)
                         }
+                        if !found_fork {
+                            // This commit can safely be disregarded in the future.
+                            visited.insert(commit.id());
+                        }
+                        found_fork
                     } else {
                         trace!("  Found fork commit {}.", commit.id());
                         // Fork found.
                         // Only the ones that are actually on the edited chain are interesting here, but the overhead shouldn't be too bad.
                         // Larger branch_index equals a more senior branch, which is necessary here to make sure changes stay where they should.
-                        //TODO: This doesn't properly handle side chain forks yet, though.
-                        // This can probably be fixed by not marking sidechain commits as visited. However, that's O(repository_depth^something).
-                        // The performance issues can be fixed if side chain commits are marked as visited if no forks are found in their parents (i.e. if they aren't based on the main line).
                         if let Some(old_value) = forks.insert(commit.id(), branch_index) {
                             if old_value > branch_index {
                                 *forks.get_mut(&commit.id()).unwrap() = old_value
                             }
                         }
+                        true
                     }
                 }
             }
