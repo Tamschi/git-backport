@@ -289,7 +289,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         );
 
         todo!("Cherry-pick while mapping parent commits (especially side chains)");
-        
+
         for dirty in dirty[0..*commit.branch_index.borrow()].iter_mut() {
             *dirty = true;
         }
