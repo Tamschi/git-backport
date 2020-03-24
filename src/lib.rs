@@ -7,7 +7,10 @@ use {
     },
     git2::{Branch, Commit, MergeOptions, Oid, Repository},
     log::{info, trace},
-    std::collections::{HashMap, HashSet},
+    std::{
+        borrow::Cow,
+        collections::{HashMap, HashSet},
+    },
 };
 
 #[derive(Debug)]
@@ -177,7 +180,26 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
     };
 
     if backup {
-        todo!("Backup!");
+        for branch in branches {
+            let backup_name = "git-backport-backup/".to_string() + branch.name().unwrap().unwrap();
+            let mut i = 0usize;
+            while {
+                let backup_name = if i == 0 {
+                    Cow::Borrowed(&backup_name)
+                } else {
+                    Cow::Owned(backup_name.clone() + "-" + &i.to_string())
+                };
+                repository
+                    .branch(
+                        backup_name.as_ref(),
+                        &branch.get().peel_to_commit().unwrap(),
+                        false,
+                    )
+                    .is_err()
+            } {
+                i += 1
+            }
+        }
     }
 
     let mut heads = vec![None; branches.len()];
