@@ -169,7 +169,9 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         forks
     };
 
-    //TODO: Backup
+    if backup {
+        todo!("Backup!");
+    }
 
     let mut heads = vec![None; branches.len()];
     let mut map = HashMap::new();
