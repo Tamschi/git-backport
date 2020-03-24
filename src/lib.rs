@@ -30,6 +30,7 @@ pub struct BackportArgs<'a, E: FnOnce(&[Branch], &[BackportCommit])> {
     pub branches: &'a [Branch<'a>],
     pub edit: E,
 }
+#[allow(clippy::cognitive_complexity)]
 pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
     BackportArgs {
         repository,
@@ -301,22 +302,34 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             .find_map(|(i, p)| if p.id() == parent.id() { Some(i) } else { None })
             .unwrap();
 
-        let cherrypick_index = repository.cherrypick_commit(
-            &commit.commit,
-            heads[*commit.branch_index.borrow()].as_ref().unwrap(),
-            mainline as u32,
-            Some(
-                MergeOptions::new()
-                    .find_renames(true)
-                    .fail_on_conflict(false)
-                    .minimal(true),
-            ),
-        );
+        info!("Cherrypicking {}...", commit.commit.id());
+        let mut cherrypick_index = repository
+            .cherrypick_commit(
+                &commit.commit,
+                heads[*commit.branch_index.borrow()].as_ref().unwrap(),
+                mainline as u32,
+                Some(
+                    MergeOptions::new()
+                        .find_renames(true)
+                        .fail_on_conflict(true)
+                        .minimal(true),
+                ),
+            )
+            .expect("Failed to cherrypick");
 
         let cherrypick_parents = commit
             .commit
             .parents()
-            .map(|p| map_commit(p, &mut map, &mut inverse_map))
+            .map(|p| {
+                if p.id() == parent.id() {
+                    heads[*commit.branch_index.borrow()]
+                        .as_ref()
+                        .unwrap()
+                        .clone()
+                } else {
+                    map_commit(p, &mut map, &mut inverse_map)
+                }
+            })
             .collect::<Vec<_>>();
 
         fn map_commit<'a>(
@@ -346,7 +359,30 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             todo!();
         }
 
-        todo!("Cherry-pick while mapping parent commits (especially side chains)");
+        let cherrypick_tree = cherrypick_index.write_tree().unwrap();
+        let cherrypick_tree = repository.find_tree(cherrypick_tree).unwrap();
+
+        let cherrypick_commit = repository
+            .commit(
+                None,
+                &commit.commit.author(),
+                &repository.signature().unwrap(),
+                commit
+                    .commit
+                    .message()
+                    .expect("Couldn't get message of commit"),
+                &cherrypick_tree,
+                cherrypick_parents.iter().collect::<Vec<_>>().as_slice(),
+            )
+            .unwrap();
+        let cherrypick_commit = repository.find_commit(cherrypick_commit).unwrap();
+        assert!(map
+            .insert(commit.commit.id(), cherrypick_commit.clone())
+            .is_none());
+        assert!(inverse_map
+            .insert(cherrypick_commit.id(), commit.commit.clone())
+            .is_none());
+        heads[*commit.branch_index.borrow()] = Some(cherrypick_commit);
 
         for dirty in dirty[0..*commit.branch_index.borrow()].iter_mut() {
             *dirty = true;
