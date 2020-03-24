@@ -293,5 +293,22 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         }
     }
 
+    catch_up_branch(
+        0,
+        branches,
+        heads.as_mut_slice(),
+        &mut inverse_map,
+        branch_map_overlays.as_mut_slice(),
+        dirty.as_mut_slice(),
+        repository,
+    );
+
+    info!("Setting branches...");
+    for (branch, head) in branches.iter().zip(heads.into_iter()) {
+        repository
+            .branch(branch.name().unwrap().unwrap(), &head.unwrap(), true)
+            .unwrap();
+    }
+
     Ok(())
 }
