@@ -274,7 +274,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
     }
 
     for commit_parent in commits.windows(2).rev() {
-        let (commit, parent) = match commit_parent {
+        let (commit, BackportCommit { commit: parent, .. }) = match commit_parent {
             [commit, parent] => (commit, parent),
             _ => unreachable!(),
         };
@@ -287,6 +287,39 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             dirty.as_mut_slice(),
             repository,
         );
+
+        let mainline = commit
+            .commit
+            .parents()
+            .enumerate()
+            .find_map(|(i, p)| if p.id() == parent.id() { Some(i) } else { None })
+            .unwrap();
+
+        let cherrypick_index = repository.cherrypick_commit(
+            &commit.commit,
+            heads[*commit.branch_index.borrow()].as_ref().unwrap(),
+            mainline as u32,
+            Some(
+                MergeOptions::new()
+                    .find_renames(true)
+                    .fail_on_conflict(false)
+                    .minimal(true),
+            ),
+        );
+
+        let cherrypick_parents = commit
+            .commit
+            .parents()
+            .map(|p| map_commit(p, &mut map))
+            .collect::<Vec<_>>();
+
+        fn map_commit<'a>(commit: Commit, map: &mut HashMap<Oid, Commit<'a>>) -> Commit<'a> {
+            if let Some(mapped) = map.get(&commit.id()) {
+                return mapped.clone();
+            }
+
+            todo!()
+        }
 
         todo!("Cherry-pick while mapping parent commits (especially side chains)");
 
