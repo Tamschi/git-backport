@@ -316,15 +316,34 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
         let cherrypick_parents = commit
             .commit
             .parents()
-            .map(|p| map_commit(p, &mut map))
+            .map(|p| map_commit(p, &mut map, &mut inverse_map))
             .collect::<Vec<_>>();
 
-        fn map_commit<'a>(commit: Commit, map: &mut HashMap<Oid, Commit<'a>>) -> Commit<'a> {
+        fn map_commit<'a>(
+            commit: Commit<'a>,
+            map: &mut HashMap<Oid, Commit<'a>>,
+            inverse_map: &mut HashMap<Oid, Commit<'a>>,
+        ) -> Commit<'a> {
             if let Some(mapped) = map.get(&commit.id()) {
                 return mapped.clone();
             }
 
-            todo!()
+            let parents = commit.parents().collect::<Vec<_>>();
+            let mapped_parents = parents
+                .iter()
+                .cloned()
+                .map(|p| map_commit(p, map, inverse_map))
+                .collect::<Vec<_>>();
+            if parents
+                .iter()
+                .zip(mapped_parents.iter())
+                .all(|(a, b)| a.id() == b.id())
+            {
+                map.insert(commit.id(), commit.clone());
+                inverse_map.insert(commit.id(), commit.clone());
+                return commit;
+            }
+            todo!();
         }
 
         todo!("Cherry-pick while mapping parent commits (especially side chains)");
