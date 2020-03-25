@@ -264,7 +264,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
                     .expect(
                         "This should never fail, since the changes were compatible to begin with.",
                     );
-                let merge_oid = merge_index.write_tree().unwrap();
+                let merge_oid = merge_index.write_tree_to(repository).unwrap();
                 let merge_tree = repository.find_tree(merge_oid).unwrap();
                 let signature = repository
                     .signature()
@@ -381,7 +381,7 @@ pub fn backport<E: FnOnce(&[Branch], &[BackportCommit])>(
             todo!();
         }
 
-        let cherrypick_tree = cherrypick_index.write_tree().unwrap();
+        let cherrypick_tree = cherrypick_index.write_tree_to(repository).unwrap();
         let cherrypick_tree = repository.find_tree(cherrypick_tree).unwrap();
 
         let cherrypick_commit = repository
